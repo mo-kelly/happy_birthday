@@ -1,0 +1,9 @@
+# Physische Ausgabe: Streaming an einen PulseAudio-Server im LAN
+# {{SERVER}} wird von switch-audio-output.sh durch die Ziel-IP/-Hostname ersetzt.
+# Voraussetzung: libasound2-plugins installiert (macht install.sh),
+# Ziel-Rechner hat PulseAudio mit aktiviertem Netzwerkmodul
+# (module-native-protocol-tcp, siehe README Troubleshooting).
+pcm.physical {
+    type pulse
+    server "{{SERVER}}"
+}

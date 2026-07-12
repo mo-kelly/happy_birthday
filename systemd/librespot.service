@@ -1,0 +1,21 @@
+[Unit]
+Description=Librespot Spotify Connect Client
+After=network-online.target sound.target
+Wants=network-online.target
+
+[Service]
+EnvironmentFile=/etc/default/librespot
+ExecStart=/usr/bin/librespot \
+    --name "${LIBRESPOT_NAME}" \
+    --backend ${LIBRESPOT_BACKEND} \
+    --device ${LIBRESPOT_DEVICE} \
+    --bitrate ${LIBRESPOT_BITRATE} \
+    --initial-volume ${LIBRESPOT_INITIAL_VOLUME} \
+    ${LIBRESPOT_EXTRA_OPTS}
+Restart=on-failure
+RestartSec=3
+User=pi
+Group=audio
+
+[Install]
+WantedBy=multi-user.target

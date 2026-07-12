@@ -1,0 +1,15 @@
+[Unit]
+Description=LedFx Audioreactive LED Controller
+After=network-online.target sound.target led-udp-bridge.service
+Wants=network-online.target
+Requires=led-udp-bridge.service
+
+[Service]
+ExecStart=/home/pi/.local/bin/ledfx --config /home/pi/.ledfx --open-ui=false
+Restart=on-failure
+RestartSec=3
+User=pi
+Group=audio
+
+[Install]
+WantedBy=multi-user.target

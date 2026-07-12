@@ -1,0 +1,12 @@
+[Unit]
+Description=LED UDP Bridge (DRGB -> WS281x GPIO)
+After=network-online.target
+
+[Service]
+ExecStart=/usr/bin/python3 /home/pi/happy_birthday/scripts/led_udp_bridge.py
+Restart=on-failure
+RestartSec=3
+User=root
+
+[Install]
+WantedBy=multi-user.target
