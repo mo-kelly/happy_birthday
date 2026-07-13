@@ -21,7 +21,7 @@ Spotify-App  ---(Spotify Connect)--->  Raspotify (librespot)  --->  ALSA "defaul
 ```
 
 - **Raspotify** (bündelt `librespot`) meldet den Pi als Spotify-Connect-Gerät an. `librespot` ist kein fertiges Debian-Paket, deshalb dieser Weg statt `apt install librespot`.
-- Ohne angeschlossenen Lautsprecher/USB-DAC schreibt `librespot` direkt auf das **ALSA-Loopback-Device** (`hw:Loopback,0,0`) - es ist aktuell kein Ton hörbar, nur die Audiodaten für die LED-Analyse verfügbar. Sobald ein echter Ausgang (USB-DAC) vorhanden ist, siehe [Echten Ton hinzufügen](#echten-ton-hinzufügen).
+- Ohne angeschlossenen Lautsprecher/USB-DAC schreibt `librespot` direkt auf das **ALSA-Loopback-Device** (`plughw:Loopback,0,0`) - es ist aktuell kein Ton hörbar, nur die Audiodaten für die LED-Analyse verfügbar. Sobald ein echter Ausgang (USB-DAC) vorhanden ist, siehe [Echten Ton hinzufügen](#echten-ton-hinzufügen).
 - **LedFx** liest die Gegenseite des Loopback-Devices (`hw:Loopback,1,0`) als Audioquelle und berechnet daraus Lichteffekte.
 - LedFx sendet die Effekte per lokalem UDP (WLED-kompatibles DRGB-Protokoll) an eine kleine Python-Bridge (`scripts/led_udp_bridge.py`), die den LED-Streifen über **SPI** (nicht GPIO/PWM!) mit `Pi5Neo` ansteuert.
 
@@ -114,7 +114,7 @@ Aktuell schreibt Raspotify direkt auf das Loopback-Device, es ist also kein Ton 
 
 1. Kartenindex ermitteln: `aplay -l`
 2. `/etc/asound.conf` um einen "Tee" erweitern, der gleichzeitig auf den USB-DAC **und** das Loopback-Device schreibt (ALSA `multi`-Plugin). Achtung: die `bindings`-Syntax muss Punktnotation nutzen (`bindings.0.slave a` / `bindings.0.channel 0`), die geschweifte Blockform (`bindings.0 { slave a; channel 0 }`) wird von manchen ALSA-Versionen nicht korrekt geparst.
-3. `LIBRESPOT_DEVICE` in `/etc/raspotify/conf` auf den neuen Tee-PCM-Namen setzen statt direkt auf `hw:Loopback,0,0`.
+3. `LIBRESPOT_DEVICE` in `/etc/raspotify/conf` auf den neuen Tee-PCM-Namen setzen statt direkt auf `plughw:Loopback,0,0`.
 
 ## Dienste
 
@@ -132,7 +132,8 @@ Logs: `journalctl -u ledfx -f`
 - **`ws2811_init failed with code -3 (Hardware revision is not supported)`**: du nutzt noch `rpi_ws281x` statt `Pi5Neo` - betrifft nur ältere Repo-Versionen, dieses Script installiert bereits `Pi5Neo`.
 - **`E: Unable to locate package librespot`**: `librespot` gibt es nicht als apt-Paket für Raspberry Pi OS. `install.sh` nutzt bereits Raspotify statt apt.
 - **Audio Sink Error / `ALSA lib pcm_multi.c: Unknown field slave`**: Syntaxfehler in `/etc/asound.conf`, meist die `bindings`-Notation im `multi`-Plugin. Punktnotation verwenden (siehe [Echten Ton hinzufügen](#echten-ton-hinzufügen)).
-- **`default` zeigt trotz eigener `/etc/asound.conf` auf ein anderes Gerät**: `/etc/alsa/conf.d/50-pulseaudio.conf` bzw. `/usr/share/alsa/alsa.conf.d/50-pulseaudio.conf` können `default` überschreiben, auch ohne laufenden PulseAudio-Daemon. `install.sh` deaktiviert diese Dateien automatisch. Alternativ: das gewünschte Gerät (z. B. `hw:Loopback,0,0`) explizit über `LIBRESPOT_DEVICE` in `/etc/raspotify/conf` setzen statt sich auf `default` zu verlassen.
+- **`default` zeigt trotz eigener `/etc/asound.conf` auf ein anderes Gerät**: `/etc/alsa/conf.d/50-pulseaudio.conf` bzw. `/usr/share/alsa/alsa.conf.d/50-pulseaudio.conf` können `default` überschreiben, auch ohne laufenden PulseAudio-Daemon. `install.sh` deaktiviert diese Dateien automatisch. Alternativ: das gewünschte Gerät explizit über `LIBRESPOT_DEVICE` in `/etc/raspotify/conf` setzen statt sich auf `default` zu verlassen.
+- **`Unsupported Format S16LE` bzw. `snd_pcm_open failed` beim Verbindungsversuch in Spotify**: `LIBRESPOT_DEVICE` darf nicht das rohe `hw:Loopback,0,0`-Gerät direkt ansprechen (führt zu Formatkonflikten, u. a. wenn LedFx die Gegenseite schon mit anderen Parametern geöffnet hat). Immer `plughw:Loopback,0,0` verwenden (mit dem `plug`-Präfix als **einem Wort**, nicht `plug:hw:...` - das erzeugt einen ALSA-Parse-Fehler "Unknown parameter"). `install.sh` setzt das bereits korrekt.
 - **LEDs reagieren nicht, obwohl alle Dienste laufen**: prüfen, ob LedFx überhaupt ein Gerät/Virtual/Effekt/Audioquelle konfiguriert hat (`curl http://localhost:8888/api/virtuals/elemax`, `curl http://localhost:8888/api/audio/devices`) - `install.sh` richtet das automatisch ein, aber die Web-UI-Vorlage (`config.yaml`) wird von der pip-Version von LedFx **nicht** automatisch eingelesen.
 - **Web-UI zeigt "Network Error"**: siehe [LedFx per API steuern](#ledfx-per-api-steuern).
 - **Pi friert ein / bootet nicht mehr**: kann an unzureichender Stromversorgung liegen (offizielles 27W-USB-C-PD-Netzteil für den Pi 5 verwenden, LEDs nicht dauerhaft vom Pi selbst versorgen) oder an einer durch harte Stromabbrüche beschädigten SD-Karte. Bei wiederholten Freezes: SD-Karte neu flashen statt wiederholt hart vom Strom zu trennen.

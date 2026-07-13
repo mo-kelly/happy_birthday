@@ -29,6 +29,7 @@ systemd/led-udp-bridge.service (wird von install.sh generiert).
 
 import socket
 import sys
+import time
 
 from pi5neo import Pi5Neo, EPixelType
 
@@ -36,7 +37,10 @@ from pi5neo import Pi5Neo, EPixelType
 LED_COUNT = 15                  # Anzahl LEDs im Streifen
 SPI_DEVICE = "/dev/spidev0.0"   # SPI0, CE0 - Standard fuer GPIO10/MOSI
 SPI_SPEED_KHZ = 800             # 800 kHz, Standardtiming fuer WS2812B
-PIXEL_TYPE = EPixelType.GRB     # WS2812B nutzt GRB-Kanalreihenfolge
+PIXEL_TYPE = EPixelType.RGB     # keine automatische Umsortierung durch Pi5Neo -
+                                 # wir tauschen R/B unten selbst (siehe scale/main),
+                                 # da dieser Streifen "BGR"-Kanalreihenfolge nutzt,
+                                 # was Pi5Neo nicht direkt als Option anbietet
 LED_BRIGHTNESS = 50             # 0-255, wird hier per Skalierung angewendet
 
 UDP_IP = "0.0.0.0"
@@ -48,9 +52,31 @@ def scale(value: int) -> int:
     return (value * LED_BRIGHTNESS) // 255
 
 
+def startup_animation(neo: Pi5Neo) -> None:
+    """
+    Signalisiert Einsatzbereitschaft: LEDs leuchten einmal nacheinander auf
+    (Lauflicht, bleiben dabei an), halten kurz alle zusammen, dann aus.
+    Nutzt Gruen, da das unabhaengig von der R/B-Vertauschung (siehe
+    PIXEL_TYPE oben) immer korrekt angezeigt wird.
+    """
+    ready_color = (0, scale(255), 0)  # (r, g, b) - hier bereits fertig fuer set_led_color
+
+    for i in range(LED_COUNT):
+        neo.set_led_color(i, *ready_color)
+        neo.update_strip(sleep_duration=None)
+        time.sleep(0.06)
+
+    time.sleep(0.4)  # kurz alle zusammen halten
+
+    neo.clear_strip()
+    neo.update_strip()
+
+
 def main():
     neo = Pi5Neo(SPI_DEVICE, num_leds=LED_COUNT, spi_speed_khz=SPI_SPEED_KHZ,
                  pixel_type=PIXEL_TYPE, quiet_mode=True)
+
+    startup_animation(neo)
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.bind((UDP_IP, UDP_PORT))
@@ -69,7 +95,8 @@ def main():
 
             for i in range(pixel_count):
                 r, g, b = payload[i * 3 : i * 3 + 3]
-                neo.set_led_color(i, scale(r), scale(g), scale(b))
+                # R und B vertauscht senden (BGR-Streifen, siehe PIXEL_TYPE oben)
+                neo.set_led_color(i, scale(b), scale(g), scale(r))
 
             # sleep_duration=None: keine kuenstliche 100ms-Latch-Pause pro
             # Frame - sonst ist die reale Update-Rate auf ~10 fps begrenzt,

@@ -95,7 +95,7 @@ fi
 
 cat > /etc/raspotify/conf <<EOF
 LIBRESPOT_NAME="$TARGET_USER"
-LIBRESPOT_DEVICE="hw:Loopback,0,0"
+LIBRESPOT_DEVICE="plughw:Loopback,0,0"
 LIBRESPOT_QUIET=
 TMPDIR=/tmp
 EOF
