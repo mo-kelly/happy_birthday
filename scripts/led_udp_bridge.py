@@ -27,6 +27,7 @@ Laeuft als root (fuer SPI-Device-Zugriff), gestartet ueber
 systemd/led-udp-bridge.service (wird von install.sh generiert).
 """
 
+import signal
 import socket
 import sys
 import time
@@ -52,6 +53,17 @@ def scale(value: int) -> int:
     return (value * LED_BRIGHTNESS) // 255
 
 
+class ShutdownSignal(Exception):
+    """Wird ausgeloest, wenn systemd das Script per SIGTERM stoppt (z.B. beim
+    Herunterfahren des Pi). Ohne diesen Handler faengt Python nur SIGINT
+    (Strg+C) automatisch als KeyboardInterrupt ab - SIGTERM wuerde den
+    Prozess sonst sofort und ohne den finally-Block (LEDs ausschalten) beenden."""
+
+
+def _handle_sigterm(signum, frame):
+    raise ShutdownSignal()
+
+
 def startup_animation(neo: Pi5Neo) -> None:
     """
     Signalisiert Einsatzbereitschaft: LEDs leuchten einmal nacheinander auf
@@ -72,7 +84,32 @@ def startup_animation(neo: Pi5Neo) -> None:
     neo.update_strip()
 
 
+def shutdown_animation(neo: Pi5Neo) -> None:
+    """
+    Genaue Umkehrung von startup_animation(): erst alle LEDs zusammen an,
+    kurz halten, dann nacheinander in umgekehrter Reihenfolge (letzte zuerst)
+    wieder aus - egal, welche Farbe der Streifen vorher gerade zeigte.
+    """
+    ready_color = (0, scale(255), 0)
+
+    for i in range(LED_COUNT):
+        neo.set_led_color(i, *ready_color)
+    neo.update_strip(sleep_duration=None)
+
+    time.sleep(0.4)  # kurz alle zusammen halten
+
+    for i in range(LED_COUNT - 1, -1, -1):
+        neo.set_led_color(i, 0, 0, 0)
+        neo.update_strip(sleep_duration=None)
+        time.sleep(0.06)
+
+    neo.clear_strip()
+    neo.update_strip()
+
+
 def main():
+    signal.signal(signal.SIGTERM, _handle_sigterm)
+
     neo = Pi5Neo(SPI_DEVICE, num_leds=LED_COUNT, spi_speed_khz=SPI_SPEED_KHZ,
                  pixel_type=PIXEL_TYPE, quiet_mode=True)
 
@@ -102,11 +139,10 @@ def main():
             # Frame - sonst ist die reale Update-Rate auf ~10 fps begrenzt,
             # egal wie schnell LedFx Pakete schickt.
             neo.update_strip(sleep_duration=None)
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, ShutdownSignal):
         pass
     finally:
-        neo.clear_strip()
-        neo.update_strip()
+        shutdown_animation(neo)
         neo.close()
         sock.close()
 
