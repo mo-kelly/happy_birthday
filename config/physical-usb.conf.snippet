@@ -1,7 +1,0 @@
-# Physische Ausgabe: USB-DAC / USB-Soundkarte
-# {{CARD}} wird von switch-audio-output.sh durch den Kartenindex ersetzt
-# (Index mit `aplay -l` ermitteln, z.B. "card 1: Device [USB Audio Device]" -> 1).
-pcm.physical {
-    type plug
-    slave.pcm "hw:{{CARD}},0"
-}

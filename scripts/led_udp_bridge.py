@@ -1,44 +1,61 @@
 #!/usr/bin/env python3
 """
-led_udp_bridge.py
+led_udp_bridge.py (Raspberry Pi 5 / Pi5Neo-Variante)
 
 Nimmt WLED-kompatible "DRGB"-Realtime-UDP-Pakete entgegen (Standardprotokoll,
 das auch LedFx fuer WLED-Geraete verwendet) und steuert damit direkt einen
-WS281x/NeoPixel-LED-Streifen ueber GPIO am Raspberry Pi (rpi_ws281x).
+WS281x/NeoPixel-LED-Streifen ueber SPI am Raspberry Pi 5 (Pi5Neo).
+
+Hintergrund: rpi_ws281x unterstuetzt den Pi 5 (BCM2712 / RP1-I/O-Chip) nicht,
+da die Bibliothek auf PWM/DMA-Register zugreift, die es beim Pi 5 so nicht
+mehr gibt. Pi5Neo nutzt stattdessen die Hardware-SPI-Schnittstelle.
 
 DRGB-Paketformat: [Timeout-Byte] [R G B] [R G B] ... (ein Byte-Triplet pro LED)
 
-Muss als root laufen (PWM/GPIO-Zugriff). Wird ueber
-systemd/led-udp-bridge.service gestartet.
+Verkabelung (anders als bei der alten GPIO18/PWM-Variante fuer Pi <5):
+  LED-Streifen DIN  -> GPIO10 / MOSI (Pin 19)
+  LED-Streifen GND  -> Pi GND (z.B. Pin 6) UND gemeinsame Masse mit
+                        externem Netzteil, falls verwendet
+  LED-Streifen 5V   -> externes 5V-Netzteil (oder fuer ganz kurze Tests mit
+                        wenigen LEDs bei reduzierter Helligkeit: Pi-5V-Pin -
+                        siehe README.md fuer Details/Grenzen)
+
+Voraussetzung: SPI muss aktiviert sein (macht install.sh automatisch):
+  sudo raspi-config -> 3 Interface Options -> I4 SPI -> Yes
+
+Laeuft als root (fuer SPI-Device-Zugriff), gestartet ueber
+systemd/led-udp-bridge.service (wird von install.sh generiert).
 """
 
 import socket
 import sys
 
-from rpi_ws281x import Color, PixelStrip
+from pi5neo import Pi5Neo, EPixelType
 
 # --- Konfiguration: an eigene Hardware anpassen ---
-LED_COUNT = 15        # Anzahl LEDs im Streifen
-LED_PIN = 18            # GPIO18 (PWM0)
-LED_FREQ_HZ = 800000
-LED_DMA = 10
-LED_BRIGHTNESS = 50     # 0-255
-LED_INVERT = False
-LED_CHANNEL = 0
+LED_COUNT = 15                  # Anzahl LEDs im Streifen
+SPI_DEVICE = "/dev/spidev0.0"   # SPI0, CE0 - Standard fuer GPIO10/MOSI
+SPI_SPEED_KHZ = 800             # 800 kHz, Standardtiming fuer WS2812B
+PIXEL_TYPE = EPixelType.GRB     # WS2812B nutzt GRB-Kanalreihenfolge
+LED_BRIGHTNESS = 50             # 0-255, wird hier per Skalierung angewendet
 
 UDP_IP = "0.0.0.0"
-UDP_PORT = 21324         # Standard-DRGB-Port, in LedFx als "Port" eintragen
+UDP_PORT = 21324                # Standard-DRGB-Port, in LedFx als "Port" eintragen
+
+
+def scale(value: int) -> int:
+    """Skaliert einen 0-255 Farbwert auf die konfigurierte Helligkeit."""
+    return (value * LED_BRIGHTNESS) // 255
 
 
 def main():
-    strip = PixelStrip(
-        LED_COUNT, LED_PIN, LED_FREQ_HZ, LED_DMA, LED_INVERT, LED_BRIGHTNESS, LED_CHANNEL
-    )
-    strip.begin()
+    neo = Pi5Neo(SPI_DEVICE, num_leds=LED_COUNT, spi_speed_khz=SPI_SPEED_KHZ,
+                 pixel_type=PIXEL_TYPE, quiet_mode=True)
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.bind((UDP_IP, UDP_PORT))
-    print(f"led_udp_bridge: lausche auf {UDP_IP}:{UDP_PORT}, {LED_COUNT} LEDs an GPIO{LED_PIN}")
+    print(f"led_udp_bridge: lausche auf {UDP_IP}:{UDP_PORT}, "
+          f"{LED_COUNT} LEDs an {SPI_DEVICE} (Pi5Neo)")
 
     try:
         while True:
@@ -52,15 +69,18 @@ def main():
 
             for i in range(pixel_count):
                 r, g, b = payload[i * 3 : i * 3 + 3]
-                strip.setPixelColor(i, Color(r, g, b))
+                neo.set_led_color(i, scale(r), scale(g), scale(b))
 
-            strip.show()
+            # sleep_duration=None: keine kuenstliche 100ms-Latch-Pause pro
+            # Frame - sonst ist die reale Update-Rate auf ~10 fps begrenzt,
+            # egal wie schnell LedFx Pakete schickt.
+            neo.update_strip(sleep_duration=None)
     except KeyboardInterrupt:
         pass
     finally:
-        for i in range(LED_COUNT):
-            strip.setPixelColor(i, Color(0, 0, 0))
-        strip.show()
+        neo.clear_strip()
+        neo.update_strip()
+        neo.close()
         sock.close()
 
 
