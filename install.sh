@@ -40,10 +40,10 @@ REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 echo "==> Nutzer: $TARGET_USER, Home: $TARGET_HOME, Repo: $REPO_DIR"
 
-echo "==> [1/11] Paketquellen aktualisieren"
+echo "==> [1/12] Paketquellen aktualisieren"
 apt-get update
 
-echo "==> [2/11] Systempakete installieren"
+echo "==> [2/12] Systempakete installieren"
 apt-get install -y \
     alsa-utils \
     libasound2-plugins \
@@ -54,12 +54,20 @@ apt-get install -y \
     python3-pip \
     python3-venv \
     curl \
-    git
+    git \
+    bluez \
+    pipewire \
+    pipewire-pulse \
+    wireplumber
 
-echo "==> [3/11] SPI aktivieren (fuer Pi5Neo/WS2812 ueber GPIO10)"
+# Bluetooth-Audio-Modul fuer PipeWire - Paketname kann sich je nach OS-Version
+# unterscheiden, deshalb mit Fallback statt hartem Abbruch
+apt-get install -y libspa-0.2-bluetooth || true
+
+echo "==> [3/12] SPI aktivieren (fuer Pi5Neo/WS2812 ueber GPIO10)"
 raspi-config nonint do_spi 0
 
-echo "==> [4/11] snd-aloop (ALSA Loopback) aktivieren, Index 2 (0/1 sind bei"
+echo "==> [4/12] snd-aloop (ALSA Loopback) aktivieren, Index 2 (0/1 sind bei"
 echo "    Pi 5 durch die beiden HDMI-Ausgaenge belegt)"
 mkdir -p /etc/modules-load.d
 if ! grep -q "^snd-aloop" /etc/modules-load.d/snd-aloop.conf 2>/dev/null; then
@@ -70,10 +78,28 @@ options snd-aloop enable=1 index=2
 EOF
 modprobe snd-aloop || true
 
-echo "==> [5/11] ALSA-Basiskonfiguration schreiben"
+echo "==> [5/12] ALSA-Basiskonfiguration schreiben"
 echo "    (kein physischer Lautsprecher/DAC vorhanden -> default zeigt direkt"
 echo "    auf das Loopback-Device, siehe Kommentar oben im Script)"
+echo "    Zusaetzlich: 'loopback_capture' als dsnoop-Gerabe, damit LedFx UND"
+echo "    z.B. eine Bluetooth-Bridge gleichzeitig von derselben Aufnahme lesen"
+echo "    koennen (siehe README.md, Abschnitt 'Bluetooth-Kopfhoerer als"
+echo "    Ausgabe'). Das ALSA-'multi'-Plugin wurde hierfuer bewusst NICHT"
+echo "    verwendet - es hat sich als unzuverlaessig erwiesen (verteilt Audio"
+echo "    nicht zuverlaessig auf mehr als eine Abzweigung, siehe README.md"
+echo "    Troubleshooting)."
 cat > /etc/asound.conf <<'EOF'
+pcm.loopback_capture {
+    type dsnoop
+    ipc_key 219219
+    slave {
+        pcm "hw:Loopback,1,0"
+        channels 2
+        rate 44100
+        format S16_LE
+    }
+}
+
 pcm.!default {
     type plug
     slave.pcm "hw:Loopback,0,0"
@@ -88,7 +114,7 @@ for f in /etc/alsa/conf.d/50-pulseaudio.conf /usr/share/alsa/alsa.conf.d/50-puls
     fi
 done
 
-echo "==> [6/11] Raspotify installieren (Spotify Connect)"
+echo "==> [6/12] Raspotify installieren (Spotify Connect)"
 if ! dpkg -l | grep -q raspotify; then
     curl -sL https://dtcooper.github.io/raspotify/install.sh | sh
 fi
@@ -100,11 +126,11 @@ LIBRESPOT_QUIET=
 TMPDIR=/tmp
 EOF
 
-echo "==> [7/11] Pi5Neo installieren (WS281x ueber SPI)"
+echo "==> [7/12] Pi5Neo installieren (WS281x ueber SPI)"
 python3 -m pip install --user pi5neo --break-system-packages
 python3 -m pip install pi5neo --break-system-packages
 
-echo "==> [8/11] LED-UDP-Bridge-Script installieren + systemd-Unit anlegen"
+echo "==> [8/12] LED-UDP-Bridge-Script installieren + systemd-Unit anlegen"
 mkdir -p "$REPO_DIR/scripts"
 chmod +x "$REPO_DIR/scripts/led_udp_bridge.py"
 chown -R "$TARGET_USER":"$TARGET_USER" "$REPO_DIR"
@@ -124,7 +150,7 @@ User=root
 WantedBy=multi-user.target
 EOF
 
-echo "==> [9/11] LedFx installieren + systemd-Unit anlegen"
+echo "==> [9/12] LedFx installieren + systemd-Unit anlegen"
 sudo -u "$TARGET_USER" python3 -m pip install --user --upgrade pip --break-system-packages
 sudo -u "$TARGET_USER" python3 -m pip install --user ledfx --break-system-packages
 
@@ -150,13 +176,22 @@ EOF
 # Bewusst OHNE "Requires=led-udp-bridge.service": das fuehrt sonst dazu, dass
 # ein Neustart/Stopp der Bridge automatisch auch LedFx mit stoppt.
 
-echo "==> [10/11] Dienste aktivieren und starten"
+echo "==> [10/12] Dienste aktivieren und starten"
 systemctl daemon-reload
 systemctl enable --now led-udp-bridge
 systemctl enable --now ledfx
 systemctl enable --now raspotify
 
-echo "==> [11/11] LedFx-Geraet/Virtual/Effekt/Audioquelle per API einrichten"
+echo "==> [11/12] PipeWire-Nutzerdienste aktivieren (fuer spaeteres optionales"
+echo "    Bluetooth-Audio-Setup, siehe README.md)"
+# "Linger" sorgt dafuer, dass PipeWire/WirePlumber als Nutzerdienst auch ohne
+# aktive Login-Session weiterlaeuft (wichtig, da der Pi headless per SSH
+# betrieben wird)
+loginctl enable-linger "$TARGET_USER" || true
+sudo -u "$TARGET_USER" XDG_RUNTIME_DIR="/run/user/$(id -u "$TARGET_USER")" \
+    systemctl --user enable --now pipewire pipewire-pulse wireplumber || true
+
+echo "==> [12/12] LedFx-Geraet/Virtual/Effekt/Audioquelle per API einrichten"
 echo "    (LedFx liest keine eigene config.yaml-Vorlage ein, deshalb hier"
 echo "    per REST-API direkt)"
 
@@ -179,12 +214,41 @@ curl -s -X POST http://localhost:8888/api/virtuals \
 
 # WICHTIG: der Feldname im Request ist "audio_device", NICHT "index" (die
 # Fehlermeldung der API selbst ist irrefuehrend, siehe
-# ledfx/api/audio_devices.py im installierten Paket). Device-Index 1 ist bei
-# unserem Loopback-Setup die Aufnahmeseite ("hw:Loopback,1,0").
-curl -s -X PUT http://localhost:8888/api/audio/devices \
-    -H "Content-Type: application/json" \
-    -d '{"audio_device": 1}' \
-    > /dev/null || true
+# ledfx/api/audio_devices.py im installierten Paket).
+#
+# Der Geraete-Index ist NICHT fest (haengt von anderen erkannten Audiogeraeten
+# ab), deshalb per Namenssuche ermitteln statt einen festen Wert zu raten.
+# "loopback_capture" (dsnoop, siehe Schritt 5) statt der rohen Hardware
+# ("hw:2,1"), damit spaeter z.B. eine Bluetooth-Bridge gleichzeitig mitlesen
+# kann, ohne mit LedFx um das Geraet zu konkurrieren ("Device or resource busy").
+LOOPBACK_CAPTURE_INDEX=""
+for i in $(seq 1 10); do
+    LOOPBACK_CAPTURE_INDEX=$(curl -s http://localhost:8888/api/audio/devices | python3 -c "
+import json, sys
+try:
+    data = json.load(sys.stdin)
+except Exception:
+    sys.exit(0)
+for idx, name in data.get('devices', {}).items():
+    if 'loopback_capture' in name:
+        print(idx)
+        break
+" 2>/dev/null || true)
+    if [[ -n "$LOOPBACK_CAPTURE_INDEX" ]]; then
+        break
+    fi
+    sleep 1
+done
+
+if [[ -n "$LOOPBACK_CAPTURE_INDEX" ]]; then
+    curl -s -X PUT http://localhost:8888/api/audio/devices \
+        -H "Content-Type: application/json" \
+        -d "{\"audio_device\": $LOOPBACK_CAPTURE_INDEX}" \
+        > /dev/null || true
+else
+    echo "    Warnung: 'loopback_capture' nicht gefunden, Audioquelle muss"
+    echo "    manuell gesetzt werden (siehe README.md)."
+fi
 
 curl -s -X POST http://localhost:8888/api/virtuals/elemax/effects \
     -H "Content-Type: application/json" \
@@ -213,6 +277,11 @@ echo ""
 echo "Falls die Web-UI (http://<host>.local:8888) bei manuellen Aenderungen"
 echo "'Network Error' zeigt (bekannter Bug dieser LedFx-Version), immer per"
 echo "curl auf dem Pi direkt aendern statt ueber die Oberflaeche."
+echo ""
+echo "Ton ist aktuell noch nicht hoerbar (Raspotify schreibt nur auf das"
+echo "Loopback-Device fuer die LED-Analyse). Fuer Bluetooth-Kopfhoerer als"
+echo "Audioausgabe siehe README.md, Abschnitt 'Bluetooth-Kopfhoerer als"
+echo "Ausgabe' (Kopfhoerer muessen dafuer einmalig manuell gekoppelt werden)."
 echo ""
 echo "Status pruefen:"
 echo "  sudo systemctl status raspotify led-udp-bridge ledfx"

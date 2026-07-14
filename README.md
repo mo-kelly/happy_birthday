@@ -7,22 +7,24 @@ Dieses Setup ist speziell für den **Raspberry Pi 5** angepasst - ältere Anleit
 ## Architektur
 
 ```
-Spotify-App  ---(Spotify Connect)--->  Raspotify (librespot)  --->  ALSA "default"
+Spotify-App  ---(Spotify Connect)--->  Raspotify (librespot)  --->  hw:Loopback,0,0
                                                                           |
-                                                              ALSA-Loopback-Device
-                                                                  (snd-aloop)
+                                                            hw:Loopback,1,0 (Aufnahme)
                                                                           |
-                                                                       LedFx
-                                                                 (Audio-Analyse)
-                                                                          |
-                                                             UDP-Bridge (DRGB, lokal)
-                                                                          |
-                                                         WS281x-LED-Streifen (SPI, GPIO10)
+                                                   pcm.loopback_capture (dsnoop, geteilt)
+                                                              /                       \
+                                                          LedFx                   bt-bridge.service
+                                                   (Audio-Analyse)          (arecord | paplay)
+                                                          |                             |
+                                             UDP-Bridge (DRGB, lokal)         Bluetooth-Kopfhoerer
+                                                          |                    (ueber PipeWire)
+                                             WS281x-LED-Streifen (SPI, GPIO10)
 ```
 
 - **Raspotify** (bündelt `librespot`) meldet den Pi als Spotify-Connect-Gerät an. `librespot` ist kein fertiges Debian-Paket, deshalb dieser Weg statt `apt install librespot`.
-- Ohne angeschlossenen Lautsprecher/USB-DAC schreibt `librespot` direkt auf das **ALSA-Loopback-Device** (`plughw:Loopback,0,0`) - es ist aktuell kein Ton hörbar, nur die Audiodaten für die LED-Analyse verfügbar. Sobald ein echter Ausgang (USB-DAC) vorhanden ist, siehe [Echten Ton hinzufügen](#echten-ton-hinzufügen).
-- **LedFx** liest die Gegenseite des Loopback-Devices (`hw:Loopback,1,0`) als Audioquelle und berechnet daraus Lichteffekte.
+- `librespot` schreibt direkt auf das **ALSA-Loopback-Device** (`plughw:Loopback,0,0`).
+- Die Aufnahmeseite (`hw:Loopback,1,0`) wird über ein `dsnoop`-Gerät (`pcm.loopback_capture`) geteilt, damit **mehrere Prozesse gleichzeitig** davon lesen können: LedFx für die Lichtanalyse, optional `bt-bridge.service` für die Ausgabe an Bluetooth-Kopfhörer (siehe [Bluetooth-Kopfhörer als Ausgabe](#bluetooth-kopfhörer-als-ausgabe)). Ohne Bluetooth-Setup ist kein Ton hörbar, nur die Audiodaten für die LED-Analyse verfügbar. Für einen kabelgebundenen USB-DAC siehe [Echten Ton hinzufügen](#echten-ton-hinzufügen).
+- **LedFx** liest `loopback_capture` als Audioquelle und berechnet daraus Lichteffekte.
 - LedFx sendet die Effekte per lokalem UDP (WLED-kompatibles DRGB-Protokoll) an eine kleine Python-Bridge (`scripts/led_udp_bridge.py`), die den LED-Streifen über **SPI** (nicht GPIO/PWM!) mit `Pi5Neo` ansteuert.
 
 ### Warum SPI statt PWM/GPIO18?
@@ -102,19 +104,74 @@ Effekt/Farbe setzen (Beispiel: Blade Power+ mit blauem Grundton):
 curl -X POST http://localhost:8888/api/virtuals/elemax/effects -H "Content-Type: application/json" -d '{"type": "blade_power_plus", "config": {"gradient": "#0000ff"}}'
 ```
 
-Audioquelle wechseln (Index mit `curl http://localhost:8888/api/audio/devices` herausfinden - das Loopback-Capture-Device, nicht "default"):
+Audioquelle wechseln (Index mit `curl http://localhost:8888/api/audio/devices` herausfinden - das Gerät heißt `loopback_capture`, der Index ist **nicht fest** und hängt davon ab, welche anderen Audiogeräte gerade erkannt werden):
 ```bash
-curl -X PUT http://localhost:8888/api/audio/devices -H "Content-Type: application/json" -d '{"audio_device": 1}'
+curl http://localhost:8888/api/audio/devices
+curl -X PUT http://localhost:8888/api/audio/devices -H "Content-Type: application/json" -d '{"audio_device": <INDEX>}'
 ```
 Wichtig: der JSON-Schlüssel heißt `audio_device`, nicht `index` (auch wenn die Fehlermeldung der API bei falscher Eingabe "index" nennt).
 
-## Echten Ton hinzufügen
+## Bluetooth-Kopfhörer als Ausgabe
 
-Aktuell schreibt Raspotify direkt auf das Loopback-Device, es ist also kein Ton hörbar. Sobald ein USB-DAC angeschlossen ist:
+Zusätzlich zur LED-Analyse kann der Ton auch über gekoppelte Bluetooth-Kopfhörer hörbar gemacht werden. Dafür wird PipeWire genutzt (bereits Teil von `install.sh`), das den Ton über eine kleine Bridge aus der geteilten Loopback-Aufnahme (`loopback_capture`) abgreift und an den Bluetooth-Lautsprecher weiterreicht.
+
+**Warum nicht einfach direkt auf zwei Geräte gleichzeitig schreiben (ALSA-`multi`-Plugin)?** Das war der erste Ansatz, hat sich aber als unzuverlässig erwiesen: das `multi`-Plugin hat in Tests reproduzierbar nur die erste von zwei konfigurierten Abzweigungen tatsächlich mit Audiodaten beliefert, die zweite blieb immer stumm - auch mit korrekter `ttable`/`bindings`-Syntax und einem waschechten Testsignal auf allen 4 Kanälen. Der jetzige Ansatz dupliziert stattdessen auf der Aufnahmeseite über `dsnoop` (extra für "mehrere Leser einer Aufnahme" gedacht) - deutlich robuster.
+
+### Einmalig: Kopfhörer koppeln
+
+```bash
+bluetoothctl
+# in der bluetoothctl-Konsole:
+power on
+agent on
+scan on
+# warten, bis das Geraet in der Liste auftaucht, dann scan off und:
+pair XX:XX:XX:XX:XX:XX
+trust XX:XX:XX:XX:XX:XX
+connect XX:XX:XX:XX:XX:XX
+exit
+```
+
+Danach prüfen, ob PipeWire den Kopfhörer als Sink sieht (Name enthält die MAC-Adresse mit Unterstrichen statt Doppelpunkten):
+```bash
+pactl list sinks short
+```
+
+### Bridge-Dienst einrichten
+
+Läuft als Nutzer-Dienst (nicht `root`), damit er automatisch Zugriff auf die PipeWire-Session hat:
+
+```bash
+mkdir -p ~/.config/systemd/user
+cat > ~/.config/systemd/user/bt-bridge.service <<'EOF'
+[Unit]
+Description=Loopback-Tee -> Bluetooth-Kopfhoerer (PipeWire)
+After=pipewire-pulse.service
+Requires=pipewire-pulse.service
+
+[Service]
+ExecStart=/bin/sh -c 'arecord -D loopback_capture -f S16_LE -r 44100 -c 2 -t raw | paplay --raw --format=s16le --rate=44100 --channels=2 --device=<SINK-NAME>'
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target
+EOF
+
+systemctl --user daemon-reload
+systemctl --user enable --now bt-bridge
+```
+
+`<SINK-NAME>` durch den Namen aus `pactl list sinks short` ersetzen (z. B. `bluez_output.XX_XX_XX_XX_XX_XX.1`).
+
+Falls der Pi neu gestartet wird und der Nutzer sich nicht einloggt: `loginctl enable-linger <benutzername>` muss aktiv sein, sonst läuft PipeWire nicht dauerhaft (macht `install.sh` bereits automatisch).
+
+## Echten Ton hinzufügen (kabelgebunden, USB-DAC)
+
+Alternative zu Bluetooth: sobald ein USB-DAC angeschlossen ist, kann Raspotify direkt darauf schreiben, ganz ohne Tee/Loopback für die Ausgabe - die LED-Analyse läuft unabhängig weiter über `loopback_capture`.
 
 1. Kartenindex ermitteln: `aplay -l`
-2. `/etc/asound.conf` um einen "Tee" erweitern, der gleichzeitig auf den USB-DAC **und** das Loopback-Device schreibt (ALSA `multi`-Plugin). Achtung: die `bindings`-Syntax muss Punktnotation nutzen (`bindings.0.slave a` / `bindings.0.channel 0`), die geschweifte Blockform (`bindings.0 { slave a; channel 0 }`) wird von manchen ALSA-Versionen nicht korrekt geparst.
-3. `LIBRESPOT_DEVICE` in `/etc/raspotify/conf` auf den neuen Tee-PCM-Namen setzen statt direkt auf `plughw:Loopback,0,0`.
+2. `LIBRESPOT_DEVICE` in `/etc/raspotify/conf` auf den USB-DAC setzen (z. B. `plughw:CARD=Device,DEV=0`) statt auf `plughw:Loopback,0,0`. Achtung: dann bekommt die LED-Analyse keine Daten mehr, da sie separat weiterhin auf dem Loopback-Device beruht - für **gleichzeitig** echten Ton UND LEDs stattdessen den Bluetooth-Ansatz als Vorlage nehmen (Tee auf der Aufnahmeseite per `dsnoop`, nicht auf der Wiedergabeseite per `multi`).
 
 ## Dienste
 
@@ -123,8 +180,11 @@ Aktuell schreibt Raspotify direkt auf das Loopback-Device, es ist also kein Ton 
 | `raspotify.service` | Spotify-Connect-Empfang, Audio-Ausgabe über ALSA |
 | `led-udp-bridge.service` | Empfängt DRGB-UDP von LedFx, steuert LED-Streifen via SPI |
 | `ledfx.service` | Audioanalyse (Loopback) + Effektberechnung, sendet an die Bridge |
+| `bt-bridge.service` (Nutzer-Dienst, optional) | Gibt den Ton zusätzlich über Bluetooth-Kopfhörer aus |
+| `pipewire`, `pipewire-pulse`, `wireplumber` (Nutzer-Dienste) | Bluetooth-Audio-Backend, benötigt für `bt-bridge.service` |
 
 Status prüfen: `sudo systemctl status raspotify ledfx led-udp-bridge`
+Bluetooth-Bridge prüfen: `systemctl --user status bt-bridge pipewire pipewire-pulse wireplumber`
 Logs: `journalctl -u ledfx -f`
 
 ## Troubleshooting
@@ -137,3 +197,7 @@ Logs: `journalctl -u ledfx -f`
 - **LEDs reagieren nicht, obwohl alle Dienste laufen**: prüfen, ob LedFx überhaupt ein Gerät/Virtual/Effekt/Audioquelle konfiguriert hat (`curl http://localhost:8888/api/virtuals/elemax`, `curl http://localhost:8888/api/audio/devices`) - `install.sh` richtet das automatisch ein, aber die Web-UI-Vorlage (`config.yaml`) wird von der pip-Version von LedFx **nicht** automatisch eingelesen.
 - **Web-UI zeigt "Network Error"**: siehe [LedFx per API steuern](#ledfx-per-api-steuern).
 - **Pi friert ein / bootet nicht mehr**: kann an unzureichender Stromversorgung liegen (offizielles 27W-USB-C-PD-Netzteil für den Pi 5 verwenden, LEDs nicht dauerhaft vom Pi selbst versorgen) oder an einer durch harte Stromabbrüche beschädigten SD-Karte. Bei wiederholten Freezes: SD-Karte neu flashen statt wiederholt hart vom Strom zu trennen.
+- **Bluetooth-Kopfhörer bekommen keinen Ton, obwohl `bt-bridge.service` läuft**: meistens ein `asound.conf`-Problem oder ein zweiter Prozess, der dasselbe Gerät schon offen hält. Test: Dienste, die `loopback_capture`/`hw:Loopback,...` nutzen könnten (`raspotify`, `ledfx`, `bt-bridge`), kurz stoppen und mit `speaker-test -D loopback_capture ...` bzw. `arecord -D loopback_capture ...` isoliert prüfen, ob überhaupt Audiodaten ankommen (nicht nur Nullen im Hex-Dump, z. B. via `od -An -tx1 datei.raw`).
+- **`arecord`/`speaker-test`: `Device or resource busy`**: ein anderer Prozess hält das ALSA-Gerät bereits exklusiv offen - meistens `raspotify` (Wiedergabeseite) oder `ledfx`/`bt-bridge` (Aufnahmeseite). Vor manuellen Tests immer kurz stoppen: `sudo systemctl stop raspotify ledfx` bzw. `systemctl --user stop bt-bridge`, danach wieder starten.
+- **ALSA-`multi`-Plugin verteilt Audio nicht auf alle Abzweigungen**: reproduzierbar beobachtet, dass von zwei konfigurierten Slaves nur der erste tatsächlich Audiodaten bekam, der zweite blieb stumm - auch mit korrekter `bindings`-Punktnotation und einem echten Mehrkanal-Testsignal. Kein reiner Syntaxfehler, sondern eine Unzuverlässigkeit dieses Plugins in dieser ALSA-Version. Lösung: für "eine Aufnahme, mehrere Leser" stattdessen `dsnoop` verwenden (siehe [Bluetooth-Kopfhörer als Ausgabe](#bluetooth-kopfhörer-als-ausgabe)), nicht `multi`.
+- **`/etc/asound.conf` hat nach mehreren Bearbeitungen widersprüchliche/doppelte `pcm.!default`-Blöcke**: passiert leicht bei mehrfachem Bearbeiten mit `nano`, wenn alter Inhalt nicht vollständig gelöscht wird (ALSA nimmt dann die letzte Definition, evtl. eine alte). Datei sicherheitshalber immer komplett neu schreiben statt zu editieren, z. B. mit `sudo tee /etc/asound.conf > /dev/null << 'EOF' ... EOF`, und danach mit `cat /etc/asound.conf` kontrollieren, dass nur ein `pcm.!default`-Block existiert.
