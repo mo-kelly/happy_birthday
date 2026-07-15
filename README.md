@@ -16,7 +16,7 @@ Spotify-App  ---(Spotify Connect)--->  Raspotify (librespot)  --->  hw:Loopback,
                                                           LedFx                   lan-audio-bridge.service
                                                    (Audio-Analyse)          (arecord | ffmpeg -> Icecast)
                                                           |                             |
-                                             UDP-Bridge (DRGB, lokal)          http://<host>.local:8000/stream.mp3
+                                             UDP-Bridge (DRGB, lokal)          http://<host>.local:8000/stream.aac
                                                           |                     /                          \
                                              WS281x-LED-Streifen (SPI, GPIO10)  MacBook (LAN, zum Testen)   Sonos (LAN, spaeter)
                                                                                                        ^
@@ -27,7 +27,7 @@ Spotify-App  ---(Spotify Connect)--->  Raspotify (librespot)  --->  hw:Loopback,
 - **Raspotify** (bündelt `librespot`) meldet den Pi als Spotify-Connect-Gerät an. `librespot` ist kein fertiges Debian-Paket, deshalb dieser Weg statt `apt install librespot`.
 - `librespot` schreibt direkt auf das **ALSA-Loopback-Device** (`plughw:Loopback,0,0`).
 - Die Aufnahmeseite (`hw:Loopback,1,0`) wird über ein `dsnoop`-Gerät (`pcm.loopback_capture`) geteilt, damit **mehrere Prozesse gleichzeitig** davon lesen können: LedFx für die Lichtanalyse, `lan-audio-bridge.service` für die Ausgabe als LAN-Audiostream (siehe [LAN-Streaming als Ausgabe](#lan-streaming-als-ausgabe)). Ohne dieses Setup ist kein Ton hörbar, nur die Audiodaten für die LED-Analyse verfügbar. Für einen kabelgebundenen USB-DAC siehe [Echten Ton hinzufügen](#echten-ton-hinzufügen).
-- Die Audioausgabe läuft **nicht mehr über Bluetooth**, sondern über das lokale Netzwerk (LAN): Icecast2 stellt einen HTTP-MP3-Stream bereit, den jedes Gerät im selben Netz abspielen kann. Aktuell dient dafür das per LAN verbundene MacBook zum Testen; später soll ein **Sonos-Lautsprecher** dieselbe Rolle übernehmen - dafür ist bereits `sonos-autoplay.service` vorbereitet, das neu im LAN auftauchende Sonos-Geräte automatisch per SoCo (`play_uri`) auf den Stream setzt, ohne dass man den Lautsprecher manuell koppeln oder in einer App konfigurieren muss.
+- Die Audioausgabe läuft **nicht mehr über Bluetooth**, sondern über das lokale Netzwerk (LAN): Icecast2 stellt einen HTTP-AAC-Stream (320 kbps) bereit, den jedes Gerät im selben Netz abspielen kann. Aktuell dient dafür das per LAN verbundene MacBook zum Testen; später soll ein **Sonos-Lautsprecher** dieselbe Rolle übernehmen - dafür ist bereits `sonos-autoplay.service` vorbereitet, das neu im LAN auftauchende Sonos-Geräte automatisch per SoCo (`play_uri`) auf den Stream setzt, ohne dass man den Lautsprecher manuell koppeln oder in einer App konfigurieren muss.
 - **LedFx** liest `loopback_capture` als Audioquelle und berechnet daraus Lichteffekte.
 - LedFx sendet die Effekte per lokalem UDP (WLED-kompatibles DRGB-Protokoll) an eine kleine Python-Bridge (`scripts/led_udp_bridge.py`), die den LED-Streifen über **SPI** (nicht GPIO/PWM!) mit `Pi5Neo` ansteuert.
 
@@ -118,26 +118,28 @@ Wichtig: der JSON-Schlüssel heißt `audio_device`, nicht `index` (auch wenn die
 
 ## LAN-Streaming als Ausgabe
 
-Zusätzlich zur LED-Analyse wird der Ton als **HTTP-MP3-Stream im lokalen Netzwerk (LAN)** bereitgestellt - nicht mehr über Bluetooth. `install.sh` richtet dafür automatisch **Icecast2** (Streaming-Server) und **ffmpeg** ein: eine kleine Bridge (`lan-audio-bridge.service`) liest aus der geteilten Loopback-Aufnahme (`loopback_capture`, dieselbe Quelle wie LedFx) und schickt sie per ffmpeg als MP3 an Icecast. Jeder Player im selben Netzwerk kann den Stream öffnen unter:
+Zusätzlich zur LED-Analyse wird der Ton als **HTTP-AAC-Stream (320 kbps) im lokalen Netzwerk (LAN)** bereitgestellt - nicht mehr über Bluetooth. `install.sh` richtet dafür automatisch **Icecast2** (Streaming-Server) und **ffmpeg** ein: eine kleine Bridge (`lan-audio-bridge.service`) liest aus der geteilten Loopback-Aufnahme (`loopback_capture`, dieselbe Quelle wie LedFx) und schickt sie per ffmpeg als AAC (ADTS) an Icecast. Jeder Player im selben Netzwerk kann den Stream öffnen unter:
 
 ```
-http://<host>.local:8000/stream.mp3
+http://<host>.local:8000/stream.aac
 ```
 
 **Aktueller Stand (dieser Branch):** Zum Testen ist ein MacBook per LAN verbunden - dort reicht es, die URL oben in VLC, mpv oder einem Browser zu öffnen, um den Ton zu hören. **Ziel:** Später soll ein **Sonos-Lautsprecher** dieselbe Rolle übernehmen. Damit dafür nur noch das Gerät ins LAN eingesteckt werden muss (kein Koppeln, keine App-Konfiguration), läuft zusätzlich `sonos-autoplay.service`: es sucht per [SoCo](https://github.com/SoCo/SoCo) (SSDP-Discovery, alle 15s) nach Sonos-Geräten im Netz und ruft bei jedem neu gefundenen Gerät automatisch `play_uri()` mit der Stream-URL auf. Sobald der Sonos im selben LAN hängt, sollte er also von selbst zu spielen anfangen.
 
 **Warum nicht einfach direkt auf zwei ALSA-Geräte gleichzeitig schreiben (`multi`-Plugin)?** Das war der erste Ansatz (aus der Bluetooth-Variante dieses Repos), hat sich aber als unzuverlässig erwiesen: das `multi`-Plugin hat in Tests reproduzierbar nur die erste von zwei konfigurierten Abzweigungen tatsächlich mit Audiodaten beliefert, die zweite blieb immer stumm - auch mit korrekter `ttable`/`bindings`-Syntax und einem waschechten Testsignal auf allen 4 Kanälen. Der jetzige Ansatz dupliziert stattdessen auf der Aufnahmeseite über `dsnoop` (extra für "mehrere Leser einer Aufnahme" gedacht) - deutlich robuster.
 
-**Warum Icecast/HTTP-Stream statt AirPlay?** Sonos-Lautsprecher unterstützen zwar teils AirPlay 2, aber nur als *Empfänger* - es gibt keine zuverlässige Linux-Implementierung, die den Pi als AirPlay-*Sender* betreiben könnte. Ein HTTP-MP3-Stream via Icecast dagegen lässt sich von praktisch jedem Gerät (MacBook jetzt, Sonos später, aber auch Handy/Tablet/Browser) ohne Zusatzsoftware abspielen und Sonos kann per `play_uri()` direkt auf eine beliebige Stream-URL gesetzt werden, ganz ohne Registrierung als Radiosender.
+**Warum Icecast/HTTP-Stream statt AirPlay?** Sonos-Lautsprecher unterstützen zwar teils AirPlay 2, aber nur als *Empfänger* - es gibt keine zuverlässige Linux-Implementierung, die den Pi als AirPlay-*Sender* betreiben könnte. Sonos selbst hat auch kein offenes Protokoll für "beliebiges Audio direkt einspeisen" - was hier verwendet wird (`play_uri()` auf eine HTTP-Stream-URL), ist genau der Weg, über den Sonos selbst Internetradio konsumiert: der Lautsprecher zieht sich den Stream aktiv von der angegebenen URL. Ein HTTP-Stream via Icecast lässt sich außerdem von praktisch jedem Gerät (MacBook jetzt, Sonos später, aber auch Handy/Tablet/Browser) ohne Zusatzsoftware abspielen.
+
+**Audioqualität:** Die Bridge kodiert mit **AAC bei 320 kbps** (statt MP3), um den zusätzlichen verlustbehafteten Encoding-Schritt möglichst gering zu halten - die Quelle ist ohnehin schon komprimiert (Spotify über `librespot`), AAC verliert bei gleicher Bitrate im Schnitt weniger als MP3. 320 kbps ist die höchste in der Praxis sinnvolle Bitrate für einen Stereo-Stream dieser Art (weiteres Erhöhen bringt kaum hörbaren Gewinn). Falls stattdessen wirklich verlustfreie Übertragung gewünscht ist, müsste die Bridge auf FLAC über Icecast umgestellt werden - das ist mit Sonos über `play_uri()` bei HTTP-*Streams* (im Gegensatz zu einzelnen Dateien) deutlich weniger gut getestet/dokumentiert als AAC/MP3 und daher hier bewusst nicht der Standardweg.
 
 ### Manuell testen (z. B. vom MacBook aus)
 
 ```bash
 # im Browser oder mit einem Player oeffnen:
-open http://<host>.local:8000/stream.mp3   # macOS
+open http://<host>.local:8000/stream.aac   # macOS
 # oder:
-ffplay http://<host>.local:8000/stream.mp3
-vlc http://<host>.local:8000/stream.mp3
+ffplay http://<host>.local:8000/stream.aac
+vlc http://<host>.local:8000/stream.aac
 ```
 
 Icecast-Statusseite (Clients, Bitrate, etc.): `http://<host>.local:8000/`
@@ -152,7 +154,7 @@ python3 -c "
 import soco
 for d in soco.discover():
     print(d.player_name, d.ip_address)
-    d.play_uri('http://<host>.local:8000/stream.mp3', title='ELEMAX')
+    d.play_uri('http://<host>.local:8000/stream.aac', title='ELEMAX')
 "
 ```
 
@@ -174,7 +176,7 @@ Alternative zum LAN-Stream: sobald ein USB-DAC angeschlossen ist, kann Raspotify
 | `raspotify.service` | Spotify-Connect-Empfang, Audio-Ausgabe über ALSA |
 | `led-udp-bridge.service` | Empfängt DRGB-UDP von LedFx, steuert LED-Streifen via SPI |
 | `ledfx.service` | Audioanalyse (Loopback) + Effektberechnung, sendet an die Bridge |
-| `icecast2.service` | Streaming-Server, stellt den HTTP-MP3-Stream im LAN bereit |
+| `icecast2.service` | Streaming-Server, stellt den HTTP-AAC-Stream (320 kbps) im LAN bereit |
 | `lan-audio-bridge.service` | Liest `loopback_capture`, schickt Ton per ffmpeg an Icecast |
 | `sonos-autoplay.service` | Sucht Sonos-Geräte im LAN, startet dort automatisch den Stream (SoCo) |
 
@@ -191,9 +193,9 @@ Logs: `journalctl -u ledfx -f` (bzw. `-u lan-audio-bridge`, `-u sonos-autoplay`,
 - **LEDs reagieren nicht, obwohl alle Dienste laufen**: prüfen, ob LedFx überhaupt ein Gerät/Virtual/Effekt/Audioquelle konfiguriert hat (`curl http://localhost:8888/api/virtuals/elemax`, `curl http://localhost:8888/api/audio/devices`) - `install.sh` richtet das automatisch ein, aber die Web-UI-Vorlage (`config.yaml`) wird von der pip-Version von LedFx **nicht** automatisch eingelesen.
 - **Web-UI zeigt "Network Error"**: siehe [LedFx per API steuern](#ledfx-per-api-steuern).
 - **Pi friert ein / bootet nicht mehr**: kann an unzureichender Stromversorgung liegen (offizielles 27W-USB-C-PD-Netzteil für den Pi 5 verwenden, LEDs nicht dauerhaft vom Pi selbst versorgen) oder an einer durch harte Stromabbrüche beschädigten SD-Karte. Bei wiederholten Freezes: SD-Karte neu flashen statt wiederholt hart vom Strom zu trennen.
-- **Kein Ton über den LAN-Stream, obwohl `lan-audio-bridge.service` läuft**: meistens ein `asound.conf`-Problem oder ein zweiter Prozess, der dasselbe Gerät schon offen hält. Test: Dienste, die `loopback_capture`/`hw:Loopback,...` nutzen könnten (`raspotify`, `ledfx`, `lan-audio-bridge`), kurz stoppen und mit `speaker-test -D loopback_capture ...` bzw. `arecord -D loopback_capture ...` isoliert prüfen, ob überhaupt Audiodaten ankommen (nicht nur Nullen im Hex-Dump, z. B. via `od -An -tx1 datei.raw`). Zusätzlich prüfen, ob Icecast den Stream überhaupt als aktive Quelle sieht: `http://<host>.local:8000/` sollte den Mountpoint `/stream.mp3` mit Clients/Bitrate anzeigen.
+- **Kein Ton über den LAN-Stream, obwohl `lan-audio-bridge.service` läuft**: meistens ein `asound.conf`-Problem oder ein zweiter Prozess, der dasselbe Gerät schon offen hält. Test: Dienste, die `loopback_capture`/`hw:Loopback,...` nutzen könnten (`raspotify`, `ledfx`, `lan-audio-bridge`), kurz stoppen und mit `speaker-test -D loopback_capture ...` bzw. `arecord -D loopback_capture ...` isoliert prüfen, ob überhaupt Audiodaten ankommen (nicht nur Nullen im Hex-Dump, z. B. via `od -An -tx1 datei.raw`). Zusätzlich prüfen, ob Icecast den Stream überhaupt als aktive Quelle sieht: `http://<host>.local:8000/` sollte den Mountpoint `/stream.aac` mit Clients/Bitrate anzeigen.
 - **`arecord`/`speaker-test`: `Device or resource busy`**: ein anderer Prozess hält das ALSA-Gerät bereits exklusiv offen - meistens `raspotify` (Wiedergabeseite) oder `ledfx`/`lan-audio-bridge` (Aufnahmeseite). Vor manuellen Tests immer kurz stoppen: `sudo systemctl stop raspotify ledfx lan-audio-bridge`, danach wieder starten.
-- **Icecast-Mountpoint `/stream.mp3` erscheint nicht / ffmpeg beendet sich sofort**: Source-Passwort in `lan-audio-bridge.service` und `/etc/icecast2/icecast.xml` müssen übereinstimmen (`journalctl -u lan-audio-bridge -f` zeigt ffmpeg-Fehler wie `403 Forbidden` bei falschem Passwort). Nach Änderung: `systemctl daemon-reload && systemctl restart icecast2 lan-audio-bridge`.
+- **Icecast-Mountpoint `/stream.aac` erscheint nicht / ffmpeg beendet sich sofort**: Source-Passwort in `lan-audio-bridge.service` und `/etc/icecast2/icecast.xml` müssen übereinstimmen (`journalctl -u lan-audio-bridge -f` zeigt ffmpeg-Fehler wie `403 Forbidden` bei falschem Passwort). Nach Änderung: `systemctl daemon-reload && systemctl restart icecast2 lan-audio-bridge`.
 - **`sonos-autoplay.service` findet keinen Sonos-Lautsprecher**: SoCo nutzt SSDP-Multicast - funktioniert nur, wenn Pi und Sonos im selben Layer-2-Netz/Subnetz hängen (kein VLAN-/Client-Isolation-Problem im WLAN). Mit `journalctl -u sonos-autoplay -f` prüfen, ob Discovery überhaupt läuft; manueller Test siehe [LAN-Streaming als Ausgabe](#lan-streaming-als-ausgabe), Abschnitt "Sonos manuell ansteuern".
 - **ALSA-`multi`-Plugin verteilt Audio nicht auf alle Abzweigungen**: reproduzierbar beobachtet, dass von zwei konfigurierten Slaves nur der erste tatsächlich Audiodaten bekam, der zweite blieb stumm - auch mit korrekter `bindings`-Punktnotation und einem echten Mehrkanal-Testsignal. Kein reiner Syntaxfehler, sondern eine Unzuverlässigkeit dieses Plugins in dieser ALSA-Version. Lösung: für "eine Aufnahme, mehrere Leser" stattdessen `dsnoop` verwenden (siehe [Bluetooth-Kopfhörer als Ausgabe](#bluetooth-kopfhörer-als-ausgabe)), nicht `multi`.
 - **`/etc/asound.conf` hat nach mehreren Bearbeitungen widersprüchliche/doppelte `pcm.!default`-Blöcke**: passiert leicht bei mehrfachem Bearbeiten mit `nano`, wenn alter Inhalt nicht vollständig gelöscht wird (ALSA nimmt dann die letzte Definition, evtl. eine alte). Datei sicherheitshalber immer komplett neu schreiben statt zu editieren, z. B. mit `sudo tee /etc/asound.conf > /dev/null << 'EOF' ... EOF`, und danach mit `cat /etc/asound.conf` kontrollieren, dass nur ein `pcm.!default`-Block existiert.

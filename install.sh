@@ -27,12 +27,15 @@
 #   Loopback gleichzeitig) einbauen - siehe README.md, Abschnitt "Echten Ton
 #   hinzufuegen".
 # - Audioausgabe erfolgt NICHT mehr ueber Bluetooth, sondern ueber LAN:
-#   Icecast2 stellt einen HTTP-MP3-Stream im lokalen Netz bereit
-#   (http://<host>.local:8000/stream.mp3), gespeist per ffmpeg aus derselben
-#   "loopback_capture"-Aufnahme wie LedFx. Jeder Player im LAN kann das jetzt
-#   abspielen (aktuell z.B. VLC/mpv/Browser auf dem MacBook); ein Sonos-
-#   Lautsprecher kann denselben Stream spaeter per SoCo automatisch
-#   abspielen, siehe README.md und scripts/sonos_autoplay.py.
+#   Icecast2 stellt einen HTTP-AAC-Stream (320 kbps) im lokalen Netz bereit
+#   (http://<host>.local:8000/stream.aac), gespeist per ffmpeg aus derselben
+#   "loopback_capture"-Aufnahme wie LedFx. AAC bei 320 kbps statt MP3, damit
+#   die zusaetzliche Kompression durch die Bridge moeglichst wenig zur
+#   ohnehin schon verlustbehafteten Spotify-Quelle beitraegt (siehe README.md,
+#   Abschnitt "LAN-Streaming als Ausgabe" fuer Details zur Audioqualitaet).
+#   Jeder Player im LAN kann das jetzt abspielen (aktuell z.B. VLC/mpv/Browser
+#   auf dem MacBook); ein Sonos-Lautsprecher kann denselben Stream spaeter per
+#   SoCo automatisch abspielen, siehe README.md und scripts/sonos_autoplay.py.
 #
 set -euo pipefail
 
@@ -183,7 +186,7 @@ EOF
 
 echo "==> [10/14] Icecast2 (LAN-Audio-Stream) konfigurieren"
 echo "    Ersetzt den frueheren Bluetooth/PipeWire-Weg: der Ton wird jetzt als"
-echo "    HTTP-MP3-Stream im LAN bereitgestellt (http://<host>.local:8000/stream.mp3)."
+echo "    HTTP-AAC-Stream (320 kbps) im LAN bereitgestellt (http://<host>.local:8000/stream.aac)."
 echo "    Passwoerter aendern, falls der Pi in einem nicht vertrauenswuerdigen"
 echo "    Netz haengt - Icecast bindet hier bewusst nur an 0.0.0.0 im LAN,"
 echo "    es gibt keine Authentifizierung fuer Hoerer, nur fuer den Source-Client."
@@ -250,7 +253,7 @@ Wants=network-online.target
 Requires=icecast2.service
 
 [Service]
-ExecStart=/bin/sh -c 'arecord -D loopback_capture -f S16_LE -r 44100 -c 2 -t raw | ffmpeg -loglevel error -f s16le -ar 44100 -ac 2 -i - -c:a libmp3lame -b:a 192k -content_type audio/mpeg -f mp3 icecast://source:${ICECAST_SOURCE_PASSWORD}@localhost:8000/stream.mp3'
+ExecStart=/bin/sh -c 'arecord -D loopback_capture -f S16_LE -r 44100 -c 2 -t raw | ffmpeg -loglevel error -f s16le -ar 44100 -ac 2 -i - -c:a aac -b:a 320k -content_type audio/aac -f adts icecast://source:${ICECAST_SOURCE_PASSWORD}@localhost:8000/stream.aac'
 Restart=on-failure
 RestartSec=3
 User=root
@@ -273,7 +276,7 @@ After=network-online.target lan-audio-bridge.service
 Wants=network-online.target
 
 [Service]
-ExecStart=/usr/bin/python3 $REPO_DIR/scripts/sonos_autoplay.py --stream-url http://${TARGET_USER}.local:8000/stream.mp3
+ExecStart=/usr/bin/python3 $REPO_DIR/scripts/sonos_autoplay.py --stream-url http://${TARGET_USER}.local:8000/stream.aac
 Restart=on-failure
 RestartSec=5
 User=$TARGET_USER
@@ -379,7 +382,7 @@ echo "'Network Error' zeigt (bekannter Bug dieser LedFx-Version), immer per"
 echo "curl auf dem Pi direkt aendern statt ueber die Oberflaeche."
 echo ""
 echo "Ton ist im LAN hoerbar unter:"
-echo "  http://${TARGET_USER}.local:8000/stream.mp3"
+echo "  http://${TARGET_USER}.local:8000/stream.aac"
 echo "Jetzt zum Testen z.B. mit VLC/mpv/Browser auf dem MacBook oeffnen."
 echo "Sobald spaeter ein Sonos-Lautsprecher im selben LAN ist, spielt er"
 echo "denselben Stream automatisch ab (sonos-autoplay.service, per SoCo) -"
