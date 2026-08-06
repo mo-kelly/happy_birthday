@@ -44,6 +44,7 @@ systemd/led-udp-bridge.service (wird von install.sh generiert).
 import queue
 import signal
 import socket
+import subprocess
 import sys
 import threading
 import time
@@ -72,6 +73,14 @@ DELAY_MS = 180
 # gesetzt wird oder die Consumer-Seite mal ins Stocken geraet - verhindert
 # unbegrenztes Speicherwachstum, verwirft im Zweifel die aeltesten Frames.
 MAX_QUEUE_SIZE = 500
+
+# --- Bose-Box: Verbindungsversuch beim Start ---
+# Setzt voraus, dass die Box bereits einmalig manuell gekoppelt/getrustet
+# wurde (siehe README.md, Abschnitt "Bluetooth-Kopfhoerer als Ausgabe" -
+# gleiches Vorgehen, nur mit dieser MAC-Adresse statt der Kopfhoerer).
+BOSE_MAC = "04:52:C7:D3:C4:D2"     # Bose Mini II SE SoundLink
+BOSE_CONNECT_RETRIES = 10
+BOSE_CONNECT_RETRY_DELAY_S = 3
 
 
 def scale(value: int) -> int:
@@ -133,6 +142,54 @@ def shutdown_animation(neo: Pi5Neo) -> None:
     neo.update_strip()
 
 
+def connect_bose() -> bool:
+    """
+    Versucht, sich mit der bereits getrusteten Bose-Box zu verbinden
+    (bluetoothctl connect). Retried mit fester Verzoegerung, z.B. weil die
+    Box beim Boot des Pi noch nicht eingeschaltet oder nicht in Reichweite
+    ist. Gibt True zurueck, sobald "Connection successful" o.ae. kommt,
+    sonst False nach Ausschoepfen der Versuche.
+
+    Laeuft bewusst NICHT beim allerersten Pairing (dafuer braucht es einen
+    physischen Knopfdruck an der Box) - das einmalige pair/trust erledigt
+    man manuell, siehe README.md.
+    """
+    for attempt in range(1, BOSE_CONNECT_RETRIES + 1):
+        result = subprocess.run(
+            ["bluetoothctl", "connect", BOSE_MAC],
+            capture_output=True, text=True, timeout=15,
+        )
+        if result.returncode == 0 and "Connection successful" in result.stdout:
+            print(f"connect_bose: verbunden ({BOSE_MAC}), Versuch {attempt}")
+            return True
+
+        print(f"connect_bose: Versuch {attempt}/{BOSE_CONNECT_RETRIES} "
+              f"fehlgeschlagen, warte {BOSE_CONNECT_RETRY_DELAY_S}s...")
+        time.sleep(BOSE_CONNECT_RETRY_DELAY_S)
+
+    print("connect_bose: Bose-Box nicht erreichbar, gebe auf.")
+    return False
+
+
+def confirmation_flash(neo: Pi5Neo, times: int = 2) -> None:
+    """
+    Kurzes Aufblitzen ALLER LEDs zusammen (kein Lauflicht wie bei
+    startup_animation), als Bestaetigung fuer "Bose-Box erfolgreich
+    verbunden". Laeuft direkt im Anschluss an startup_animation().
+    """
+    flash_color = (0, scale(255), 0)
+
+    for _ in range(times):
+        for i in range(LED_COUNT):
+            neo.set_led_color(i, *flash_color)
+        neo.update_strip(sleep_duration=None)
+        time.sleep(0.15)
+
+        neo.clear_strip()
+        neo.update_strip(sleep_duration=None)
+        time.sleep(0.15)
+
+
 def _consumer(neo: Pi5Neo, frame_queue: "queue.Queue[tuple[float, bytes]]",
               stop_event: threading.Event) -> None:
     """
@@ -173,6 +230,9 @@ def main():
                  pixel_type=PIXEL_TYPE, quiet_mode=True)
 
     startup_animation(neo)
+
+    if connect_bose():
+        confirmation_flash(neo)
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.bind((UDP_IP, UDP_PORT))
