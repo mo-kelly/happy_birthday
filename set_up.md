@@ -63,12 +63,6 @@ curl http://localhost:8888/api/audio/devices
 
 ## 5. LED-Streifen verkabeln
 
-| LED-Streifen | Pi 5 |
-|---|---|
-| DIN (Data) | Pin 19 (GPIO10 / SPI0 MOSI) |
-| GND | Pin 6 (+ gemeinsame Masse mit externem Netzteil) |
-| 5V | separates externes 5V-Netzteil |
-
 **Kurztest ohne externes Netzteil** (nur wenige LEDs, reduzierte Helligkeit):
 
 | Funktion | Pin | Übliche Kabelfarbe* |
@@ -77,8 +71,6 @@ curl http://localhost:8888/api/audio/devices
 | GND | Pin 6 | meist Schwarz/Weiß |
 | 5V | Pin 2 oder Pin 4 | meist Rot |
 
-*Kein verbindlicher Standard – vor dem Anschließen Beschriftung am Streifen
-bzw. Datenblatt prüfen.
 
 ## 6. Neue Bluetooth-Box koppeln (einmalig, physischer Knopfdruck nötig)
 
