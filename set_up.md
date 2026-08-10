@@ -1,3 +1,5 @@
+# Happy Birthday! Mit dem Folgenden Setup kann wird der Rasberry Pi be spotify als Lautsprecher angezeigt und kann  LEDs und Musik parallel steuern. Unabhängig von diesem Projekt glaube ich, dass du mit dem Rasberry sehr viel Spaß haben wirst! Alles gute zum Geburtstag, ich lieble dich <3 
+
 # Pi in neuem WLAN mit neuer Bluetooth-Box einrichten
 
 Komplettanleitung, um das happy_birthday-Setup (Branch `max_bluetooth`) an
