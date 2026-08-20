@@ -78,7 +78,7 @@ MAX_QUEUE_SIZE = 500
 # Setzt voraus, dass die Box bereits einmalig manuell gekoppelt/getrustet
 # wurde (siehe README.md, Abschnitt "Bluetooth-Kopfhoerer als Ausgabe" -
 # gleiches Vorgehen, nur mit dieser MAC-Adresse statt der Kopfhoerer).
-BOSE_MAC = "04:52:C7:D3:C4:D2"     # Bose Mini II SE SoundLink
+BOSE_MAC = "78:5E:A2:BB:1A:10"     # Bose Mini II SE SoundLink
 BOSE_CONNECT_RETRIES = 10
 BOSE_CONNECT_RETRY_DELAY_S = 3
 

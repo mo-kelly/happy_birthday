@@ -4,7 +4,7 @@ After=pipewire-pulse.service
 Requires=pipewire-pulse.service
 
 [Service]
-ExecStart=/bin/sh -c 'arecord -D loopback_capture -f S16_LE -r 44100 -c 2 -t raw | paplay --raw --format=s16le --rate=44100 --channels=2 --device=bluez_output.04_52_C7_D3_C4_D2.1'
+ExecStart=/bin/sh -c 'arecord -D loopback_capture -f S16_LE -r 44100 -c 2 -t raw | paplay --raw --format=s16le --rate=44100 --channels=2 --device=bluez_output.78_5E_A2_BB_1A_10.1'
 Restart=on-failure
 RestartSec=3
 
