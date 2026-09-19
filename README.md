@@ -105,8 +105,9 @@ python scripts/screen_color_sender.py --pi <PI-IP-ODER-HOSTNAME> --leds 15
 ```
 
 `--monitor 1` wählt den ersten Bildschirm, `--monitor 2` den zweiten. Die
-Standardwerte von 20 FPS und `--smooth 0.8` halten die Reaktion eng am Bild.
-Für noch direktere, aber unruhigere Farben kann `--smooth 1` verwendet werden.
+Die Standardwerte von `--smooth 0.35` und `--brightness 0.65` halten die Farben
+ruhig und etwas gedimmt. Für direktere, aber unruhigere Farben kann `--smooth 1`
+verwendet werden; `--brightness 0.4` ist noch dunkler.
 `--once`
 sendet nur einen Frame zum Testen; `--dry-run` zeigt die berechneten Farben ohne
 Netzwerkpaket. Für Filme mit schwarzen Balken werden oben und unten standardmäßig

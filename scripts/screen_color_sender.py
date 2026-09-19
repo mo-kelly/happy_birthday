@@ -23,6 +23,10 @@ def _blend(previous: tuple[int, int, int], current: tuple[int, int, int], amount
     )
 
 
+def _dim(color: tuple[int, int, int], brightness: float) -> tuple[int, int, int]:
+    return tuple(_clamp_channel(channel * brightness) for channel in color)
+
+
 def _dominant_color(image) -> tuple[int, int, int]:
     """Choose a vivid, common color while avoiding black movie bars."""
     quantized = image.quantize(colors=8, method=2)
@@ -75,7 +79,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--leds", type=int, default=15)
     parser.add_argument("--monitor", type=int, default=1, help="mss monitor number (1 is the first display)")
     parser.add_argument("--fps", type=float, default=20.0)
-    parser.add_argument("--smooth", type=float, default=0.8, help="new-frame weight from 0 to 1")
+    parser.add_argument("--smooth", type=float, default=0.35, help="new-frame weight from 0 to 1")
+    parser.add_argument("--brightness", type=float, default=0.65, help="screen color brightness from 0 to 1")
     parser.add_argument("--crop", type=float, default=0.08, help="top/bottom crop fraction for letterbox bars")
     parser.add_argument("--once", action="store_true", help="send one frame and exit")
     parser.add_argument("--dry-run", action="store_true", help="capture and print one frame without sending")
@@ -84,8 +89,9 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    if args.leds < 1 or args.fps <= 0 or not 0 <= args.smooth <= 1 or not 0 <= args.crop < 0.5:
-        raise SystemExit("leds must be positive, fps must be > 0, smooth must be 0..1, crop must be 0..0.5")
+    if (args.leds < 1 or args.fps <= 0 or not 0 <= args.smooth <= 1
+            or not 0 <= args.brightness <= 1 or not 0 <= args.crop < 0.5):
+        raise SystemExit("leds must be positive, fps must be > 0, smooth and brightness must be 0..1, crop must be 0..0.5")
 
     try:
         from mss import MSS
@@ -108,7 +114,7 @@ def main() -> None:
             while True:
                 shot = capture.grab(monitor)
                 frame = Image.frombytes("RGB", shot.size, shot.rgb)
-                current = colors_from_frame(frame, args.leds, args.crop)
+                current = [_dim(color, args.brightness) for color in colors_from_frame(frame, args.leds, args.crop)]
                 smoothed = [_blend(old, new, args.smooth) for old, new in zip(previous, current)]
                 packet = drgb_packet(smoothed)
 
