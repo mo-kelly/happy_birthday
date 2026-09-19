@@ -214,8 +214,8 @@ def _consumer(neo: Pi5Neo, frame_queue: "queue.Queue[tuple[float, bytes]]",
         pixel_count = min(LED_COUNT, len(payload) // 3)
         for i in range(pixel_count):
             r, g, b = payload[i * 3: i * 3 + 3]
-            # Pi5Neo handles the strip's channel order; keep screen RGB unchanged.
-            neo.set_led_color(i, scale(r), scale(g), scale(b))
+            # Hardware test shows red and green are reversed; blue is unchanged.
+            neo.set_led_color(i, scale(g), scale(r), scale(b))
 
         # sleep_duration=None: keine kuenstliche 100ms-Latch-Pause pro
         # Frame - sonst ist die reale Update-Rate auf ~10 fps begrenzt,
