@@ -214,8 +214,8 @@ def _consumer(neo: Pi5Neo, frame_queue: "queue.Queue[tuple[float, bytes]]",
         pixel_count = min(LED_COUNT, len(payload) // 3)
         for i in range(pixel_count):
             r, g, b = payload[i * 3: i * 3 + 3]
-            # Screen sender uses the standard RGB order.
-            neo.set_led_color(i, scale(r), scale(g), scale(b))
+            # This strip is wired BGR, so swap red and blue at the hardware boundary.
+            neo.set_led_color(i, scale(b), scale(g), scale(r))
 
         # sleep_duration=None: keine kuenstliche 100ms-Latch-Pause pro
         # Frame - sonst ist die reale Update-Rate auf ~10 fps begrenzt,
