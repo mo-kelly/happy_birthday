@@ -28,22 +28,11 @@ def _dim(color: tuple[int, int, int], brightness: float) -> tuple[int, int, int]
 
 
 def _dominant_color(image) -> tuple[int, int, int]:
-    """Choose a vivid, common color while avoiding black movie bars."""
-    quantized = image.quantize(colors=8, method=2)
-    colors = quantized.getcolors(maxcolors=8)
-    if not colors:
+    """Return a stable average color instead of a frame-by-frame palette winner."""
+    pixels = list(image.resize((1, 1)).getdata())
+    if not pixels:
         return (0, 0, 0)
-
-    palette = quantized.getpalette()
-    candidates = []
-    for count, palette_index in colors:
-        offset = palette_index * 3
-        red, green, blue = palette[offset:offset + 3]
-        brightness = max(red, green, blue) / 255
-        saturation = (max(red, green, blue) - min(red, green, blue)) / 255
-        score = count * (0.35 + saturation) * (0.5 + brightness)
-        candidates.append((score, (red, green, blue)))
-    return max(candidates, key=lambda item: item[0])[1]
+    return tuple(round(channel) for channel in pixels[0])
 
 
 def colors_from_frame(frame, led_count: int, crop_ratio: float = 0.08) -> list[tuple[int, int, int]]:
