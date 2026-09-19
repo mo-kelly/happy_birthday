@@ -104,7 +104,10 @@ python -m pip install -r requirements-screen.txt
 python scripts/screen_color_sender.py --pi <PI-IP-ODER-HOSTNAME> --leds 15
 ```
 
-`--monitor 1` wählt den ersten Bildschirm, `--monitor 2` den zweiten. `--once`
+`--monitor 1` wählt den ersten Bildschirm, `--monitor 2` den zweiten. Die
+Standardwerte von 20 FPS und `--smooth 0.8` halten die Reaktion eng am Bild.
+Für noch direktere, aber unruhigere Farben kann `--smooth 1` verwendet werden.
+`--once`
 sendet nur einen Frame zum Testen; `--dry-run` zeigt die berechneten Farben ohne
 Netzwerkpaket. Für Filme mit schwarzen Balken werden oben und unten standardmäßig
 8 % des Bildes ignoriert. Stoppen lässt sich der Sender mit `Ctrl+C`.

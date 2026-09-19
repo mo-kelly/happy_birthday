@@ -74,8 +74,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--port", type=int, default=21324)
     parser.add_argument("--leds", type=int, default=15)
     parser.add_argument("--monitor", type=int, default=1, help="mss monitor number (1 is the first display)")
-    parser.add_argument("--fps", type=float, default=15.0)
-    parser.add_argument("--smooth", type=float, default=0.35, help="new-frame weight from 0 to 1")
+    parser.add_argument("--fps", type=float, default=20.0)
+    parser.add_argument("--smooth", type=float, default=0.8, help="new-frame weight from 0 to 1")
     parser.add_argument("--crop", type=float, default=0.08, help="top/bottom crop fraction for letterbox bars")
     parser.add_argument("--once", action="store_true", help="send one frame and exit")
     parser.add_argument("--dry-run", action="store_true", help="capture and print one frame without sending")
@@ -88,12 +88,12 @@ def main() -> None:
         raise SystemExit("leds must be positive, fps must be > 0, smooth must be 0..1, crop must be 0..0.5")
 
     try:
-        from mss import mss
+        from mss import MSS
         from PIL import Image
     except ImportError as error:
         raise SystemExit("Install screen sender dependencies with: python -m pip install -r requirements-screen.txt") from error
 
-    with mss() as capture:
+    with MSS() as capture:
         monitors = capture.monitors
         if args.monitor >= len(monitors):
             raise SystemExit(f"monitor {args.monitor} not found; available monitors: 1-{len(monitors) - 1}")
