@@ -88,6 +88,34 @@ sudo reboot
 
 - **Spotify-Gerätename:** `/etc/raspotify/conf`, Zeile `LIBRESPOT_NAME`, danach `sudo systemctl restart raspotify`.
 - **LED-Anzahl/Helligkeit:** `scripts/led_udp_bridge.py`, `LED_COUNT`/`LED_BRIGHTNESS`, danach Datei auf den Pi kopieren und `sudo systemctl restart led-udp-bridge`. Zusätzlich `pixel_count` im LedFx-Gerät anpassen (siehe unten, per curl).
+
+## Bildschirmfarben statt Musik
+
+Der Branch `screen_colors` enthält einen optionalen Sender für Filme und andere
+Bildschirminhalte. Der Sender läuft auf dem Computer, auf dem der Film angezeigt
+wird (nicht auf dem headless Raspberry Pi), liest die Bildschirmfarben und sendet
+weiterhin das vorhandene DRGB-Protokoll an die Bridge. Der Musikbetrieb auf dem Pi
+bleibt dadurch unverändert.
+
+Auf dem Computer mit dem Film:
+
+```bash
+python -m pip install -r requirements-screen.txt
+python scripts/screen_color_sender.py --pi <PI-IP-ODER-HOSTNAME> --leds 15
+```
+
+`--monitor 1` wählt den ersten Bildschirm, `--monitor 2` den zweiten. `--once`
+sendet nur einen Frame zum Testen; `--dry-run` zeigt die berechneten Farben ohne
+Netzwerkpaket. Für Filme mit schwarzen Balken werden oben und unten standardmäßig
+8 % des Bildes ignoriert. Stoppen lässt sich der Sender mit `Ctrl+C`.
+
+Der Sender und LedFx benutzen denselben UDP-Port. Daher sollte für diesen Modus
+LedFx gestoppt werden, damit nicht beide Programme gleichzeitig Frames senden:
+
+```bash
+sudo systemctl stop ledfx
+python scripts/screen_color_sender.py --pi <PI-IP-ODER-HOSTNAME> --leds 15
+```
 - **Lichteffekt/Farbe:** siehe [LedFx per API steuern](#ledfx-per-api-steuern) - die Web-UI hat einen bekannten Bug.
 
 ## LedFx per API steuern

@@ -67,7 +67,7 @@ UDP_PORT = 21324                # Standard-DRGB-Port, in LedFx als "Port" eintra
 # Verzoegerung, um LEDs an die Bluetooth-Audio-Latenz anzugleichen. Siehe
 # Kalibrierungs-Hinweis oben im Modul-Docstring. 0 = altes Verhalten
 # (keine Verzoegerung, z.B. bei kabelgebundenem USB-DAC ohne BT-Latenz).
-DELAY_MS = 180
+DELAY_MS = 0
 
 # Maximale Queue-Groesse als Sicherheitsnetz, falls DELAY_MS sehr hoch
 # gesetzt wird oder die Consumer-Seite mal ins Stocken geraet - verhindert
